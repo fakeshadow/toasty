@@ -1,5 +1,6 @@
 use crate::{stmt::Id, Model, Result};
 
+use std::borrow::Cow;
 use toasty_core::stmt;
 
 pub trait Primitive: Sized {
@@ -101,6 +102,20 @@ impl<T: Primitive> Primitive for Option<T> {
     }
 }
 
+impl<T> Primitive for Cow<'_, T>
+where
+    T: ToOwned + ?Sized,
+    T::Owned: Primitive,
+{
+    fn ty() -> stmt::Type {
+        <T::Owned as Primitive>::ty()
+    }
+
+    fn load(value: stmt::Value) -> Result<Self> {
+        <T::Owned as Primitive>::load(value).map(Cow::Owned)
+    }
+}
+
 impl Primitive for uuid::Uuid {
     fn ty() -> stmt::Type {
         stmt::Type::Uuid
@@ -110,6 +125,20 @@ impl Primitive for uuid::Uuid {
         match value {
             stmt::Value::Uuid(v) => Ok(v),
             _ => anyhow::bail!("cannot convert value to uuid::Uuid {value:#?}"),
+        }
+    }
+}
+
+#[cfg(feature = "bigdecimal")]
+impl Primitive for bigdecimal::BigDecimal {
+    fn ty() -> stmt::Type {
+        stmt::Type::BigDecimal
+    }
+
+    fn load(value: stmt::Value) -> Result<Self> {
+        match value {
+            stmt::Value::BigDecimal(v) => Ok(v),
+            _ => anyhow::bail!("cannot convert value to bigdecimal::BigDecimal {value:#?}"),
         }
     }
 }
