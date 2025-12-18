@@ -123,7 +123,7 @@ impl Db {
         self.shared.pool.driver()
     }
 
-    pub fn schema(&self) -> &Arc<Schema> {
+    pub fn schema(&self) -> &Schema {
         &self.shared.engine.schema
     }
 

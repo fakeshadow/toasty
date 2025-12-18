@@ -59,11 +59,7 @@ impl Engine {
     /// This is the main entry point for query execution. The statement passes
     /// through the full compilation pipeline (lowering → planning → execution)
     /// before being sent to the database driver via the provided connection.
-    pub(crate) async fn exec(
-        &self,
-        connection: &mut PoolConnection,
-        stmt: Statement,
-    ) -> Result<ValueStream> {
+    pub(crate) async fn exec(&self, stmt: Statement) -> Result<ValueStream> {
         if cfg!(debug_assertions) {
             self.verify(&stmt);
         }
