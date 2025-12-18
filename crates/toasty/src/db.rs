@@ -5,10 +5,6 @@ mod pool;
 pub use builder::Builder;
 pub use connect::*;
 pub use pool::*;
-use tokio::{
-    sync::{mpsc, oneshot},
-    task::JoinHandle,
-};
 
 use crate::{engine::Engine, stmt, Cursor, Model, Result, Statement};
 
@@ -17,15 +13,6 @@ use toasty_core::{stmt::ValueStream, Schema};
 #[derive(Debug)]
 pub struct Db {
     pub(crate) engine: Engine,
-
-    /// Handle to send statements to be executed
-    pub(crate) in_tx: mpsc::UnboundedSender<(
-        toasty_core::stmt::Statement,
-        oneshot::Sender<Result<ValueStream>>,
-    )>,
-
-    /// Handle to task driving the query engine
-    pub(crate) join_handle: JoinHandle<()>,
 }
 
 impl Db {
@@ -34,9 +21,9 @@ impl Db {
     }
 
     /// Execute a query, returning all matching records
-    pub async fn all<M: Model>(&self, query: stmt::Select<M>) -> Result<Cursor<M>> {
+    pub async fn all<M: Model>(&self, query: stmt::Select<M>) -> Result<Cursor<'_, M>> {
         let records = self.exec(query.into()).await?;
-        Ok(Cursor::new(self.engine.schema.clone(), records))
+        Ok(Cursor::new(&self.engine.schema, records))
     }
 
     pub async fn first<M: Model>(&self, query: stmt::Select<M>) -> Result<Option<M>> {
@@ -64,14 +51,9 @@ impl Db {
     }
 
     /// Execute a statement
+    #[inline]
     pub async fn exec<M: Model>(&self, statement: Statement<M>) -> Result<ValueStream> {
-        let (tx, rx) = oneshot::channel();
-
-        // Send the statement to the execution engine
-        self.in_tx.send((statement.untyped, tx)).unwrap();
-
-        // Return the typed result
-        rx.await.unwrap()
+        self.engine.exec(statement.untyped).await
     }
 
     /// Execute a statement, assume only one record is returned
@@ -96,7 +78,7 @@ impl Db {
     pub async fn exec_insert_one<M: Model>(&self, stmt: stmt::Insert<M>) -> Result<M> {
         // Execute the statement and return the result
         let records = self.exec(stmt.into()).await?;
-        let mut cursor = Cursor::new(self.engine.schema.clone(), records);
+        let mut cursor = Cursor::new(&self.engine.schema, records);
 
         cursor.next().await.unwrap()
     }
@@ -113,12 +95,5 @@ impl Db {
 
     pub fn schema(&self) -> &Schema {
         &self.engine.schema
-    }
-}
-
-impl Drop for Db {
-    fn drop(&mut self) {
-        // TODO: make this less aggressive
-        self.join_handle.abort();
     }
 }

@@ -237,7 +237,7 @@ impl NestedMergePlanner<'_> {
     fn build_exec_statement_ty_for(&self, stmt_id: hir::StmtId) -> stmt::Type {
         let stmt_state = &self.hir[stmt_id];
         let cx = stmt::ExprContext::new_with_target(
-            &*self.engine.schema,
+            &self.engine.schema,
             stmt_state.stmt.as_deref().unwrap(),
         );
 

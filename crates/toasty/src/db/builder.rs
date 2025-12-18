@@ -7,11 +7,7 @@ use crate::{
 use toasty_core::{
     driver::Driver,
     schema::{self, app},
-    stmt::{Value, ValueStream},
 };
-use tokio::sync::oneshot;
-
-use std::sync::Arc;
 
 #[derive(Default)]
 pub struct Builder {
@@ -52,44 +48,8 @@ impl Builder {
             .core
             .build(self.build_app_schema()?, pool.capability())?;
 
-        let engine = Engine::new(Arc::new(schema), Arc::new(pool));
-        let engine2 = engine.clone();
+        let engine = Engine::new(schema, pool);
 
-        let (in_tx, mut in_rx) = tokio::sync::mpsc::unbounded_channel::<(
-            toasty_core::stmt::Statement,
-            oneshot::Sender<Result<ValueStream>>,
-        )>();
-
-        let join_handle = tokio::spawn(async move {
-            loop {
-                let (stmt, tx) = in_rx.recv().await.unwrap();
-
-                match engine2.exec(stmt).await {
-                    Ok(mut value_stream) => {
-                        let (row_tx, mut row_rx) =
-                            tokio::sync::mpsc::unbounded_channel::<crate::Result<Value>>();
-
-                        let _ = tx.send(Ok(ValueStream::from_stream(async_stream::stream! {
-                            while let Some(res) = row_rx.recv().await {
-                                yield res
-                            }
-                        })));
-
-                        while let Some(res) = value_stream.next().await {
-                            let _ = row_tx.send(res);
-                        }
-                    }
-                    Err(err) => {
-                        let _ = tx.send(Err(err));
-                    }
-                }
-            }
-        });
-
-        Ok(Db {
-            engine,
-            in_tx,
-            join_handle,
-        })
+        Ok(Db { engine })
     }
 }

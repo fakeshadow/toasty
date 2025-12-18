@@ -15,7 +15,6 @@ mod ty;
 mod verify;
 
 use crate::{db::Pool, Result};
-use std::sync::Arc;
 use toasty_core::{
     driver::Capability,
     stmt::{self, Statement, ValueStream},
@@ -34,18 +33,18 @@ use toasty_core::{
 /// 2. **Lowering.** Convert to HIR with dependency tracking.
 /// 3. **Planning.** Build MIR operation graph.
 /// 4. **Execution.** Run actions against the database driver.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct Engine {
     /// The schema being managed by this database instance.
-    pub(crate) schema: Arc<Schema>,
+    pub(crate) schema: Schema,
 
     /// Handle to the connection pool.
-    pub(crate) pool: Arc<Pool>,
+    pub(crate) pool: Pool,
 }
 
 impl Engine {
     /// Creates a new [`Engine`] with the given schema and driver.
-    pub(crate) fn new(schema: Arc<Schema>, pool: Arc<Pool>) -> Engine {
+    pub(crate) fn new(schema: Schema, pool: Pool) -> Engine {
         Engine { schema, pool }
     }
 
