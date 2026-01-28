@@ -26,26 +26,31 @@ pub struct MySQL {
 impl MySQL {
     pub fn new(url: impl Into<String>) -> Result<Self> {
         let url_str = url.into();
-        let url = Url::parse(&url_str).map_err(toasty_core::Error::driver)?;
+        let url = Url::parse(&url_str).map_err(toasty_core::Error::driver_operation_failed)?;
 
         if url.scheme() != "mysql" {
-            return Err(toasty_core::err!(
+            return Err(toasty_core::Error::invalid_connection_url(format!(
                 "connection url does not have a `mysql` scheme; url={}",
                 url
-            ));
+            )));
         }
 
-        url.host_str()
-            .ok_or_else(|| toasty_core::err!("missing host in connection URL; url={}", url))?;
+        url.host_str().ok_or_else(|| {
+            toasty_core::Error::invalid_connection_url(format!(
+                "missing host in connection URL; url={}",
+                url
+            ))
+        })?;
 
         if url.path().is_empty() {
-            return Err(toasty_core::err!(
+            return Err(toasty_core::Error::invalid_connection_url(format!(
                 "no database specified - missing path in connection URL; url={}",
                 url
-            ));
+            )));
         }
 
-        let opts = mysql_async::Opts::from_url(url.as_ref()).map_err(toasty_core::Error::driver)?;
+        let opts = mysql_async::Opts::from_url(url.as_ref())
+            .map_err(toasty_core::Error::driver_operation_failed)?;
         let opts = mysql_async::OptsBuilder::from_opts(opts).client_found_rows(true);
 
         let pool = Pool::new(opts);
@@ -66,7 +71,7 @@ impl Driver for MySQL {
             .pool
             .get_conn()
             .await
-            .map_err(toasty_core::Error::driver)?;
+            .map_err(toasty_core::Error::driver_operation_failed)?;
         Ok(Box::new(Connection::new(conn)))
     }
 }
@@ -99,7 +104,7 @@ impl Connection {
         self.conn
             .exec_drop(&sql, ())
             .await
-            .map_err(toasty_core::Error::driver)?;
+            .map_err(toasty_core::Error::driver_operation_failed)?;
 
         for index in &table.indices {
             if index.primary_key {
@@ -116,7 +121,7 @@ impl Connection {
             self.conn
                 .exec_drop(&sql, ())
                 .await
-                .map_err(toasty_core::Error::driver)?;
+                .map_err(toasty_core::Error::driver_operation_failed)?;
         }
 
         Ok(())
@@ -146,7 +151,7 @@ impl Connection {
         self.conn
             .exec_drop(&sql, ())
             .await
-            .map_err(toasty_core::Error::driver)?;
+            .map_err(toasty_core::Error::driver_operation_failed)?;
         Ok(())
     }
 }
@@ -170,21 +175,21 @@ impl toasty_core::driver::Connection for Connection {
                 self.conn
                     .query_drop("START TRANSACTION")
                     .await
-                    .map_err(toasty_core::Error::driver)?;
+                    .map_err(toasty_core::Error::driver_operation_failed)?;
                 return Ok(Response::count(0));
             }
             Operation::Transaction(Transaction::Commit) => {
                 self.conn
                     .query_drop("COMMIT")
                     .await
-                    .map_err(toasty_core::Error::driver)?;
+                    .map_err(toasty_core::Error::driver_operation_failed)?;
                 return Ok(Response::count(0));
             }
             Operation::Transaction(Transaction::Rollback) => {
                 self.conn
                     .query_drop("ROLLBACK")
                     .await
-                    .map_err(toasty_core::Error::driver)?;
+                    .map_err(toasty_core::Error::driver_operation_failed)?;
                 return Ok(Response::count(0));
             }
             op => todo!("op={:#?}", op),
@@ -207,14 +212,14 @@ impl toasty_core::driver::Connection for Connection {
             .conn
             .prep(&sql_as_str)
             .await
-            .map_err(toasty_core::Error::driver)?;
+            .map_err(toasty_core::Error::driver_operation_failed)?;
 
         if ret.is_none() {
             let count = self
                 .conn
                 .exec_iter(&statement, mysql_async::Params::Positional(args))
                 .await
-                .map_err(toasty_core::Error::driver)?
+                .map_err(toasty_core::Error::driver_operation_failed)?
                 .affected_rows();
 
             // Handle the last_insert_id_hack for MySQL INSERT with RETURNING
@@ -230,8 +235,12 @@ impl toasty_core::driver::Connection for Connection {
                     .conn
                     .query_first("SELECT LAST_INSERT_ID()")
                     .await
-                    .map_err(toasty_core::Error::driver)?
-                    .ok_or_else(|| toasty_core::err!("LAST_INSERT_ID() returned no rows"))?;
+                    .map_err(toasty_core::Error::driver_operation_failed)?
+                    .ok_or_else(|| {
+                        toasty_core::Error::driver_operation_failed(std::io::Error::other(
+                            "LAST_INSERT_ID() returned no rows",
+                        ))
+                    })?;
 
                 // Generate rows with sequential IDs
                 let results = (0..num_rows).map(move |offset| {
@@ -252,7 +261,7 @@ impl toasty_core::driver::Connection for Connection {
             .conn
             .exec(&statement, &args)
             .await
-            .map_err(toasty_core::Error::driver)?;
+            .map_err(toasty_core::Error::driver_operation_failed)?;
 
         if let Some(returning) = ret {
             let results = rows.into_iter().map(move |mut row| {
@@ -282,7 +291,9 @@ impl toasty_core::driver::Connection for Connection {
             if total == condition_matched {
                 Ok(Response::count(total as _))
             } else {
-                toasty_core::bail!("update condition did not match");
+                Err(toasty_core::Error::condition_failed(
+                    "update condition did not match",
+                ))
             }
         }
     }

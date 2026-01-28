@@ -41,7 +41,9 @@ impl Db {
         match res.next().await {
             Some(Ok(value)) => Ok(value),
             Some(Err(err)) => Err(err),
-            None => crate::bail!("failed to find record"),
+            None => Err(toasty_core::Error::record_not_found(
+                "query returned no results",
+            )),
         }
     }
 
@@ -61,11 +63,15 @@ impl Db {
     pub async fn exec_one<M: Model>(&self, statement: Statement<M>) -> Result<stmt::Value> {
         let mut res = self.exec(statement).await?;
         let Some(ret) = res.next().await else {
-            crate::bail!("empty result set")
+            return Err(toasty_core::Error::record_not_found(
+                "statement returned no results",
+            ));
         };
         let next = res.next().await;
         let None = next else {
-            crate::bail!("more than one record; next={next:#?}")
+            return Err(toasty_core::Error::invalid_record_count(
+                "expected 1 record, found multiple",
+            ));
         };
 
         ret

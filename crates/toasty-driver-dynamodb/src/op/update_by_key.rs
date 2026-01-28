@@ -140,10 +140,14 @@ impl Connection {
                             // TODO: can we check?
                             // assert!(!condition.eval_bool(&record).unwrap());
 
-                            // TODO: probably map the error, but for now fall through
+                            return Err(toasty_core::Error::condition_failed(
+                                "DynamoDB conditional check failed",
+                            ));
                         }
 
-                        return Err(toasty_core::Error::driver(SdkError::ServiceError(e)));
+                        return Err(toasty_core::Error::driver_operation_failed(
+                            SdkError::ServiceError(e),
+                        ));
                     }
                 } else {
                     let mut transact_items = vec![];
@@ -217,10 +221,13 @@ impl Connection {
                     .set_attributes_to_get(Some(attributes_to_get))
                     .send()
                     .await
-                    .map_err(toasty_core::Error::driver)?;
+                    .map_err(toasty_core::Error::driver_operation_failed)?;
 
                 let Some(mut curr_unique_values) = res.item else {
-                    toasty_core::bail!("item not found")
+                    return Err(toasty_core::Error::record_not_found(format!(
+                        "table={} key={:?}",
+                        table.name, key
+                    )));
                 };
 
                 // Which unique attributes are being updated
@@ -378,12 +385,9 @@ impl Connection {
                         .send()
                         .await;
 
-                    if let Err(SdkError::ServiceError(e)) = res {
-                        // TODO: do some checks on the error
-                        toasty_core::bail!("failed to update = {:#?}", e);
+                    if let Err(e) = res {
+                        return Err(toasty_core::Error::driver_operation_failed(e));
                     }
-
-                    assert!(res.is_ok());
                 }
             }
             _ => todo!(),
