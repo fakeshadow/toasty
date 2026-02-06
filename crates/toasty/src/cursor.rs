@@ -22,11 +22,10 @@ impl<'a, M: Model> Cursor<'a, M> {
 
     pub async fn next(&mut self) -> Option<Result<M, Error>> {
         Some(match self.values.next().await? {
-            Ok(stmt::Value::Record(row)) => {
-                self.validate_row(&row);
-                M::load(row)
+            Ok(value) => {
+                self.validate_row(&value);
+                M::load(value)
             }
-            Ok(value) => todo!("value={value:#?}"),
             Err(e) => Err(e),
         })
     }
@@ -46,12 +45,14 @@ impl<'a, M: Model> Cursor<'a, M> {
     }
 
     #[track_caller]
-    fn validate_row(&self, record: &stmt::ValueRecord) {
+    fn validate_row(&self, value: &stmt::Value) {
         if cfg!(debug_assertions) {
-            let expect_num_columns = self.schema.app.model(M::id()).fields.len();
+            if let stmt::Value::Record(record) = value {
+                let expect_num_columns = self.schema.app.model(M::id()).fields.len();
 
-            if record.len() != expect_num_columns {
-                panic!("expected row to have {expect_num_columns} columns; {record:#?}");
+                if record.len() != expect_num_columns {
+                    panic!("expected row to have {expect_num_columns} columns; {record:#?}");
+                }
             }
         }
     }

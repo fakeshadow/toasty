@@ -1,7 +1,7 @@
 use crate::{
     db::{Connect, Pool},
     engine::Engine,
-    Db, Model, Result,
+    Db, Register, Result,
 };
 
 use toasty_core::{
@@ -22,7 +22,7 @@ pub struct Builder {
 }
 
 impl Builder {
-    pub fn register<T: Model>(&mut self) -> &mut Self {
+    pub fn register<T: Register>(&mut self) -> &mut Self {
         self.models.push(T::schema());
         self
     }
@@ -42,7 +42,7 @@ impl Builder {
     }
 
     pub async fn build(&mut self, driver: impl Driver) -> Result<Db> {
-        let pool = Pool::new(driver).await?;
+        let pool = Pool::new(driver)?;
 
         // Validate capability consistency
         pool.capability().validate()?;
