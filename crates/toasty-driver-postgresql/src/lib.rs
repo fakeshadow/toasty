@@ -31,7 +31,7 @@ impl PostgreSQL {
         let url_str = url.into();
         let url = Url::parse(&url_str).map_err(toasty_core::Error::driver_operation_failed)?;
 
-        if url.scheme() != "postgresql" {
+        if !matches!(url.scheme(), "postgresql" | "postgres") {
             return Err(toasty_core::Error::invalid_connection_url(format!(
                 "connection URL does not have a `postgresql` scheme; url={}",
                 url
@@ -382,7 +382,7 @@ impl toasty_core::driver::Connection for Connection {
         // Execute each migration statement
         for statement in migration.statements() {
             if let Err(e) = transaction
-                .execute(statement, &[])
+                .batch_execute(statement)
                 .await
                 .map_err(toasty_core::Error::driver_operation_failed)
             {
