@@ -48,7 +48,7 @@ impl<'a, M: Model> Cursor<'a, M> {
     fn validate_row(&self, value: &stmt::Value) {
         if cfg!(debug_assertions) {
             if let stmt::Value::Record(record) = value {
-                let expect_num_columns = self.schema.app.model(M::id()).fields.len();
+                let expect_num_columns = self.schema.app.model(M::id()).expect_root().fields.len();
 
                 if record.len() != expect_num_columns {
                     panic!("expected row to have {expect_num_columns} columns; {record:#?}");
