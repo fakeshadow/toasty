@@ -17,7 +17,7 @@ impl Expand<'_> {
                 &root.create_struct_ident,
                 &root.update_struct_ident,
             ),
-            ModelKind::EmbeddedStruct(_) => {
+            ModelKind::EmbeddedStruct(_) | ModelKind::EmbeddedEnum(_) => {
                 // Embedded models don't generate CRUD methods, just return early
                 return TokenStream::new();
             }
@@ -51,10 +51,12 @@ impl Expand<'_> {
 
                 #vis fn update(&mut self) -> #update_struct_ident<&mut Self> {
                     use #toasty::IntoSelect;
-                    #update_struct_ident {
+                    let mut s = #update_struct_ident {
                         stmt: #toasty::stmt::Update::new(self.into_select()),
                         target: self,
-                    }
+                    };
+                    s.apply_update_defaults();
+                    s
                 }
 
                 #vis fn all() -> #query_struct_ident {
