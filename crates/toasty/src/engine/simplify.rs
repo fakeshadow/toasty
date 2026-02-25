@@ -18,11 +18,9 @@ mod stmt_query;
 // TODO: unify names
 mod lift_in_subquery;
 mod lift_pk_select;
-mod rewrite_root_path_expr;
-
 use toasty_core::{
     schema::{
-        app::{Field, FieldId, Model, ModelId, ModelRoot},
+        app::{Field, FieldId},
         *,
     },
     stmt::{self, Expr, IntoExprTarget, Node, VisitMut},
@@ -220,14 +218,6 @@ impl<'a> Simplify<'a> {
         self.cx.schema()
     }
 
-    fn model(&self, model_id: impl Into<ModelId>) -> &Model {
-        self.cx.schema().app.model(model_id.into())
-    }
-
-    fn model_root(&self, model_id: impl Into<ModelId>) -> &ModelRoot {
-        self.model(model_id).expect_root()
-    }
-
     fn field(&self, field_id: impl Into<FieldId>) -> &Field {
         self.cx.schema().app.field(field_id.into())
     }
@@ -276,28 +266,4 @@ impl<'a> Simplify<'a> {
 }
 
 #[cfg(test)]
-mod test {
-    use toasty_core::{
-        driver::Capability,
-        schema::{
-            app::{self, Model},
-            Builder,
-        },
-    };
-
-    /// Creates an empty schema for testing simplification.
-    pub fn test_schema() -> toasty_core::Schema {
-        Builder::new()
-            .build(app::Schema::default(), &Capability::SQLITE)
-            .expect("empty schema should build")
-    }
-
-    #[cfg(test)]
-    pub(crate) fn test_schema_with(models: &[Model]) -> toasty_core::Schema {
-        let app_schema = app::Schema::from_macro(models).expect("schema should build from macro");
-
-        Builder::new()
-            .build(app_schema, &Capability::SQLITE)
-            .expect("schema should build")
-    }
-}
+mod tests;
