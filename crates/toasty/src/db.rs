@@ -8,10 +8,16 @@ pub use pool::*;
 
 use crate::{engine::Engine, stmt, Cursor, Model, Result, Statement};
 
-use toasty_core::{driver::Driver, stmt::ValueStream, Schema};
+use toasty_core::{
+    driver::Driver,
+    stmt::{Value, ValueStream},
+    Schema,
+};
 
-#[derive(Debug)]
-pub struct Db {
+use std::sync::Arc;
+
+/// Shared state between all `Db` clones.
+pub(crate) struct Shared {
     pub(crate) engine: Engine,
 }
 
@@ -26,7 +32,13 @@ impl Db {
         Ok(Cursor::new(&self.engine.schema, records))
     }
 
-    pub async fn first<M: Model>(&self, query: stmt::Select<M>) -> Result<Option<M>> {
+    /// Execute a query, returning all matching records
+    pub async fn all<M: Model>(&mut self, query: stmt::Select<M>) -> Result<Cursor<M>> {
+        let records = self.exec(query.into()).await?;
+        Ok(Cursor::new(self.shared.engine.schema.clone(), records))
+    }
+
+    pub async fn first<M: Model>(&mut self, query: stmt::Select<M>) -> Result<Option<M>> {
         let mut res = self.all(query).await?;
         match res.next().await {
             Some(Ok(value)) => Ok(Some(value)),
@@ -35,7 +47,7 @@ impl Db {
         }
     }
 
-    pub async fn get<M: Model>(&self, query: stmt::Select<M>) -> Result<M> {
+    pub async fn get<M: Model>(&mut self, query: stmt::Select<M>) -> Result<M> {
         let mut res = self.all(query).await?;
 
         match res.next().await {
@@ -47,7 +59,7 @@ impl Db {
         }
     }
 
-    pub async fn delete<M: Model>(&self, query: stmt::Select<M>) -> Result<()> {
+    pub async fn delete<M: Model>(&mut self, query: stmt::Select<M>) -> Result<()> {
         self.exec(query.delete()).await?;
         Ok(())
     }
@@ -60,7 +72,7 @@ impl Db {
 
     /// Execute a statement, assume only one record is returned
     #[doc(hidden)]
-    pub async fn exec_one<M: Model>(&self, statement: Statement<M>) -> Result<stmt::Value> {
+    pub async fn exec_one<M: Model>(&mut self, statement: Statement<M>) -> Result<stmt::Value> {
         let mut res = self.exec(statement).await?;
         let Some(ret) = res.next().await else {
             return Err(toasty_core::Error::record_not_found(
@@ -81,7 +93,7 @@ impl Db {
     ///
     /// Used by generated code
     #[doc(hidden)]
-    pub async fn exec_insert_one<M: Model>(&self, mut stmt: stmt::Insert<M>) -> Result<M> {
+    pub async fn exec_insert_one<M: Model>(&mut self, mut stmt: stmt::Insert<M>) -> Result<M> {
         // TODO: HAX
         stmt.untyped.source.single = false;
 
@@ -93,29 +105,35 @@ impl Db {
     }
 
     /// Creates tables and indices defined in the schema on the database.
-    pub async fn push_schema(&self) -> Result<()> {
-        self.engine
-            .pool
-            .get()
-            .await?
-            .push_schema(&self.engine.schema.db)
-            .await
+    pub async fn push_schema(&mut self) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        let conn = self.connection().await?;
+        conn.in_tx
+            .send(ConnectionOperation::PushSchema { tx })
+            .unwrap();
+        rx.await.unwrap()
     }
 
     /// Drops the entire database and recreates an empty one without applying migrations.
     pub async fn reset_db(&self) -> Result<()> {
-        self.driver().reset_db().await
+        self.shared.pool.driver().reset_db().await
     }
 
     pub fn driver(&self) -> &dyn Driver {
-        self.engine.driver()
+        self.shared.pool.driver()
     }
 
-    pub fn schema(&self) -> &Schema {
-        &self.engine.schema
+    pub fn schema(&self) -> &Arc<Schema> {
+        &self.shared.engine.schema
     }
 
     pub fn capability(&self) -> &Capability {
-        self.engine.capability()
+        self.shared.engine.capability()
+    }
+
+    /// Returns a reference to the connection pool backing this handle.
+    #[doc(hidden)]
+    pub fn pool(&self) -> &Pool {
+        &self.shared.pool
     }
 }

@@ -58,7 +58,7 @@ impl<M: Model> Paginate<M> {
         self
     }
 
-    pub async fn collect(mut self, db: &Db) -> Result<crate::Page<M>> {
+    pub async fn collect(mut self, db: &mut Db) -> Result<crate::Page<M>> {
         // Extract the limit from the query to determine page size
         let page_size = match &self.query.untyped.limit {
             Some(stmt::Limit { limit, .. }) => {

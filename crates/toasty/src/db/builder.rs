@@ -1,5 +1,5 @@
 use crate::{
-    db::{Connect, Pool},
+    db::{Connect, Pool, Shared},
     engine::Engine,
     Db, Register, Result,
 };
@@ -43,7 +43,7 @@ impl Builder {
 
     pub async fn build(&mut self, driver: impl Driver) -> Result<Db> {
         let pool = Pool::new(driver)?;
-
+        let capability = pool.capability();
         // Validate capability consistency
         pool.capability().validate()?;
 
