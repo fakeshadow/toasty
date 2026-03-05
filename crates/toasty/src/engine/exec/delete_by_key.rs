@@ -43,7 +43,10 @@ impl Exec<'_> {
                 filter: action.filter.clone(),
             };
 
-            let res = self.connection.exec(&self.engine.schema, op.into()).await?;
+            let res = self
+                .connection
+                .exec(&self.engine.schema.db, op.into())
+                .await?;
 
             assert!(res.rows.is_count(), "TODO");
             res.rows

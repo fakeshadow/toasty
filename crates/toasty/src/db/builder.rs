@@ -1,8 +1,4 @@
-use crate::{
-    db::{Connect, Pool, Shared},
-    engine::Engine,
-    Db, Register, Result,
-};
+use crate::{engine::Engine, Db, Register, Result};
 
 use toasty_core::{
     driver::Driver,
@@ -37,21 +33,15 @@ impl Builder {
         app::Schema::from_macro(&self.models)
     }
 
-    pub async fn connect(&mut self, url: &str) -> Result<Db> {
-        self.build(Connect::new(url)?).await
-    }
-
     pub async fn build(&mut self, driver: impl Driver) -> Result<Db> {
-        let pool = Pool::new(driver)?;
-        let capability = pool.capability();
         // Validate capability consistency
-        pool.capability().validate()?;
+        driver.capability().validate()?;
 
         let schema = self
             .core
-            .build(self.build_app_schema()?, pool.capability())?;
+            .build(self.build_app_schema()?, driver.capability())?;
 
-        let engine = Engine::new(schema, pool);
+        let engine = Engine::new(schema, Box::new(driver));
 
         Ok(Db { engine })
     }

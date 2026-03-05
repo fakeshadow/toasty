@@ -13,9 +13,9 @@ use simplify::Simplify;
 mod ty;
 mod verify;
 
-use crate::{db::Pool, Result};
+use crate::Result;
 use toasty_core::{
-    driver::Capability,
+    driver::{Capability, Driver},
     stmt::{self, Statement, ValueStream},
     Schema,
 };
@@ -39,18 +39,18 @@ pub(crate) struct Engine {
     pub(crate) schema: Schema,
 
     /// Handle to the connection pool.
-    pub(crate) pool: Pool,
+    pub(crate) driver: Box<dyn Driver>,
 }
 
 impl Engine {
     /// Creates a new [`Engine`] with the given schema and driver.
-    pub(crate) fn new(schema: Schema, pool: Pool) -> Engine {
-        Engine { schema, pool }
+    pub(crate) fn new(schema: Schema, driver: Box<dyn Driver>) -> Engine {
+        Engine { schema, driver }
     }
 
     /// Returns the driver's capabilities.
     pub(crate) fn capability(&self) -> &Capability {
-        self.capability
+        self.driver.capability()
     }
 
     /// Executes a statement on the given connection and returns the result as a
@@ -77,9 +77,11 @@ impl Engine {
         // Translate the optimized statement into a series of driver operations.
         let plan = self.plan_hir_statement(hir)?;
 
+        let conn = self.driver.connect().await?;
+
         // The plan is called once (single entry record stream) with no arguments
         // (empty record).
-        self.exec_plan(connection, plan).await
+        self.exec_plan(conn, plan).await
     }
 
     /// Returns a new [`ExprContext`](stmt::ExprContext) for this engine's schema.

@@ -8,30 +8,12 @@ members = [
     "crates/toasty-macros",
     "crates/toasty-sql",
 
-    # Driver implementations
-    "crates/toasty-driver-dynamodb",
-    "crates/toasty-driver-mysql",
-    "crates/toasty-driver-postgresql",
-    "crates/toasty-driver-sqlite",
-
     # Driver integration test suite
     "crates/toasty-driver-integration-suite",
     "crates/toasty-driver-integration-suite-macros",
 
     # General utilities.
     "crates/std-util",
-
-    # Examples
-    "examples/composite-key",
-    "examples/hello-toasty",
-    "examples/todo-with-cli",
-    "examples/user-has-one-profile",
-
-    # Tests
-    "tests",
-
-    # Benchmarks
-    "benches",
 ]
 
 [workspace.dependencies]
@@ -43,12 +25,6 @@ toasty-core = { path = "crates/toasty-core" }
 toasty-macros = { path = "crates/toasty-macros" }
 toasty-sql = { path = "crates/toasty-sql" }
 std-util = { path = "crates/std-util" }
-
-# Driver implementations
-toasty-driver-dynamodb = { path = "crates/toasty-driver-dynamodb" }
-toasty-driver-mysql = { path = "crates/toasty-driver-mysql" }
-toasty-driver-postgresql = { path = "crates/toasty-driver-postgresql" }
-toasty-driver-sqlite = { path = "crates/toasty-driver-sqlite" }
 
 # Driver integration test suite dependencies
 toasty-driver-integration-suite = { path = "crates/toasty-driver-integration-suite" }
@@ -66,27 +42,19 @@ by_address = "1.2.1"
 cfg-if = "1.0.0"
 clap = { version = "4.5.20", features = ["derive"] }
 console = "0.16"
-deadpool = { version = "0.12.3", features = ["rt_tokio_1"] }
 dialoguer = "0.12"
 heck = "0.5.0"
 indexmap = "2.6.0"
 index_vec = "0.1.4"
 jiff = "0.2.16"
 lru = "0.16.2"
-mysql_async = { version = "0.35.1", default-features = false, features = [
-    "minimal",
-    "native-tls-tls",
-] }
 pluralizer = "0.4.0"
-postgres = "0.19.10"
-postgres-types = { version = "0.2.9", features = ["with-uuid-1", "array-impls"] }
 pretty_assertions = "1.4.1"
 proc-macro2 = "1.0.37"
 quote = "1.0.18"
 rand = "0.8.5"
 rust_decimal = "1.39.0"
 bigdecimal = "0.4.7"
-rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1.0.214", features = ["derive"] }
 serde_json = "1.0.132"
 syn = { version = "2.0.86", features = ["full", "extra-traits", "visit-mut"] }
@@ -95,7 +63,6 @@ toml_edit = "0.24.0"
 tempfile = "3.8"
 proptest = "1"
 tokio = { version = "1.18", features = ["full"] }
-tokio-postgres = "0.7.13"
 tokio-stream = { version = "0.1.16", default-features = false }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

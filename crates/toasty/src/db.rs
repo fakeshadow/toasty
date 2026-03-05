@@ -1,23 +1,17 @@
 mod builder;
-mod connect;
-mod pool;
 
 pub use builder::Builder;
-pub use connect::*;
-pub use pool::*;
 
 use crate::{engine::Engine, stmt, Cursor, Model, Result, Statement};
 
 use toasty_core::{
-    driver::Driver,
-    stmt::{Value, ValueStream},
+    driver::{Capability, Driver},
+    stmt::ValueStream,
     Schema,
 };
 
-use std::sync::Arc;
-
-/// Shared state between all `Db` clones.
-pub(crate) struct Shared {
+#[derive(Debug)]
+pub struct Db {
     pub(crate) engine: Engine,
 }
 
@@ -30,12 +24,6 @@ impl Db {
     pub async fn all<M: Model>(&self, query: stmt::Select<M>) -> Result<Cursor<'_, M>> {
         let records = self.exec(query.into()).await?;
         Ok(Cursor::new(&self.engine.schema, records))
-    }
-
-    /// Execute a query, returning all matching records
-    pub async fn all<M: Model>(&mut self, query: stmt::Select<M>) -> Result<Cursor<M>> {
-        let records = self.exec(query.into()).await?;
-        Ok(Cursor::new(self.shared.engine.schema.clone(), records))
     }
 
     pub async fn first<M: Model>(&mut self, query: stmt::Select<M>) -> Result<Option<M>> {
@@ -106,34 +94,28 @@ impl Db {
 
     /// Creates tables and indices defined in the schema on the database.
     pub async fn push_schema(&mut self) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        let conn = self.connection().await?;
-        conn.in_tx
-            .send(ConnectionOperation::PushSchema { tx })
-            .unwrap();
-        rx.await.unwrap()
+        self.engine
+            .driver
+            .connect()
+            .await?
+            .push_schema(&self.engine.schema.db)
+            .await
     }
 
     /// Drops the entire database and recreates an empty one without applying migrations.
     pub async fn reset_db(&self) -> Result<()> {
-        self.shared.pool.driver().reset_db().await
+        self.driver().reset_db().await
     }
 
     pub fn driver(&self) -> &dyn Driver {
-        self.shared.pool.driver()
+        &*self.engine.driver
     }
 
     pub fn schema(&self) -> &Schema {
-        &self.shared.engine.schema
+        &self.engine.schema
     }
 
     pub fn capability(&self) -> &Capability {
-        self.shared.engine.capability()
-    }
-
-    /// Returns a reference to the connection pool backing this handle.
-    #[doc(hidden)]
-    pub fn pool(&self) -> &Pool {
-        &self.shared.pool
+        self.engine.capability()
     }
 }

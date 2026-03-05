@@ -6,8 +6,8 @@ use toasty::driver::Driver;
 use toasty_core::{
     async_trait,
     driver::{Capability, Connection, Operation, Response, Rows},
-    schema::db::{AppliedMigration, Migration, SchemaDiff},
-    Result, Schema,
+    schema::db::{AppliedMigration, Migration, Schema, SchemaDiff},
+    Result,
 };
 
 #[derive(Debug)]
@@ -78,7 +78,7 @@ pub struct LoggingConnection {
 
 #[async_trait]
 impl Connection for LoggingConnection {
-    async fn exec(&mut self, schema: &Arc<Schema>, operation: Operation) -> Result<Response> {
+    async fn exec(&mut self, schema: &Schema, operation: Operation) -> Result<Response> {
         // Clone the operation for logging
         let operation_clone = operation.clone();
 

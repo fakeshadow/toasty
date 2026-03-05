@@ -59,7 +59,10 @@ impl Exec<'_> {
                 returning: action.returning,
             };
 
-            let res = self.connection.exec(&self.engine.schema, op.into()).await?;
+            let res = self
+                .connection
+                .exec(&self.engine.schema.db, op.into())
+                .await?;
 
             debug_assert_eq!(!res.rows.is_count(), action.returning);
 

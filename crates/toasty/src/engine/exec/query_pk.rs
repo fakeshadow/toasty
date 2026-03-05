@@ -64,7 +64,7 @@ impl Exec<'_> {
                 let res = self
                     .connection
                     .exec(
-                        &self.engine.schema,
+                        &self.engine.schema.db,
                         operation::QueryPk {
                             table: action.table,
                             index: action.index,
@@ -102,7 +102,7 @@ impl Exec<'_> {
         let res = self
             .connection
             .exec(
-                &self.engine.schema,
+                &self.engine.schema.db,
                 operation::QueryPk {
                     table: action.table,
                     index: action.index,

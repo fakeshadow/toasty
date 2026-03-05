@@ -48,15 +48,16 @@ pub(crate) use update_by_key::UpdateByKey;
 mod var;
 pub(crate) use var::{VarDecls, VarId, VarStore};
 
-use crate::{db::PoolConnection, engine::Engine, Result};
+use crate::{engine::Engine, Result};
 use toasty_core::{
     driver::{operation::Transaction, Rows},
     stmt::{self, ValueStream},
+    Connection,
 };
 
 struct Exec<'a> {
     engine: &'a Engine,
-    connection: &'a mut PoolConnection,
+    connection: Box<dyn Connection>,
     vars: VarStore,
     /// Monotonically increasing counter for generating unique savepoint IDs
     /// within a single plan execution.
@@ -70,7 +71,7 @@ struct Exec<'a> {
 impl Engine {
     pub(crate) async fn exec_plan(
         &self,
-        connection: &mut PoolConnection,
+        connection: Box<dyn Connection>,
         plan: ExecPlan,
     ) -> Result<ValueStream> {
         let mut exec = Exec {
@@ -83,7 +84,7 @@ impl Engine {
 
         if plan.needs_transaction {
             exec.connection
-                .exec(&self.schema, Transaction::start().into())
+                .exec(&self.schema.db, Transaction::start().into())
                 .await?;
             exec.in_transaction = true;
         }
@@ -94,7 +95,7 @@ impl Engine {
                     // Best effort: ignore rollback errors so the original error is returned
                     let _ = exec
                         .connection
-                        .exec(&self.schema, Transaction::Rollback.into())
+                        .exec(&self.schema.db, Transaction::Rollback.into())
                         .await;
                 }
                 return Err(e);
@@ -103,7 +104,7 @@ impl Engine {
 
         if plan.needs_transaction {
             exec.connection
-                .exec(&self.schema, Transaction::Commit.into())
+                .exec(&self.schema.db, Transaction::Commit.into())
                 .await?;
         }
 

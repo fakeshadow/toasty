@@ -9,13 +9,10 @@ pub use operation::{IsolationLevel, Operation};
 
 use crate::{
     async_trait,
-    schema::{
-        db::{AppliedMigration, Migration, SchemaDiff},
-        Schema,
-    },
+    schema::db::{AppliedMigration, Migration, Schema, SchemaDiff},
 };
 
-use std::{borrow::Cow, fmt::Debug, sync::Arc};
+use std::{borrow::Cow, fmt::Debug};
 
 #[async_trait]
 pub trait Driver: Debug + Send + Sync + 'static {
@@ -47,7 +44,7 @@ pub trait Driver: Debug + Send + Sync + 'static {
 #[async_trait]
 pub trait Connection: Debug + Send + 'static {
     /// Execute a database operation
-    async fn exec(&mut self, schema: &Arc<Schema>, plan: Operation) -> crate::Result<Response>;
+    async fn exec(&mut self, schema: &Schema, plan: Operation) -> crate::Result<Response>;
 
     /// Creates tables and indices defined in the schema on the database.
     /// TODO: This will probably use database introspection in the future.
