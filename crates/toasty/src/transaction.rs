@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{Db, Executor, Result};
+use crate::{db::Connection, Db, Executor, Result};
 
 use toasty_core::{
     async_trait,
@@ -8,6 +8,7 @@ use toasty_core::{
     stmt::Value,
     Schema,
 };
+use tokio::sync::Mutex;
 
 /// Builder for configuring a transaction before starting it.
 pub struct TransactionBuilder<'db> {
@@ -51,9 +52,8 @@ impl<'db> TransactionBuilder<'db> {
 /// If dropped without calling [`commit`](Self::commit) or
 /// [`rollback`](Self::rollback), the transaction is automatically rolled back.
 pub struct Transaction<'db> {
+    conn: Arc<Mutex<Box<dyn Connection>>>,
     db: &'db Db,
-
-    /// Cloned engine for schema access and query compilation.
     /// Whether commit or rollback has been called.
     finalized: bool,
 
@@ -72,24 +72,24 @@ impl<'db> Transaction<'db> {
         isolation: Option<IsolationLevel>,
         read_only: bool,
     ) -> Result<Transaction<'db>> {
+        let conn = db.connection().await?;
+
         // We're creating the Transaction struct before actually starting the transaction. If the
         // future is cancelled while waiting on the response of the start command, the transaction
         // is still rolled back.
-        let tx = Transaction {
+        let mut tx = Transaction {
+            conn: Arc::new(Mutex::new(conn)),
             db,
             finalized: false,
             savepoint: None,
         };
 
-        tx.db
-            .exec_operation(
-                operation::Transaction::Start {
-                    isolation,
-                    read_only,
-                }
-                .into(),
-            )
-            .await?;
+        tx.execute(operation::Transaction::Start {
+            isolation,
+            read_only,
+        })
+        .await?;
+
         Ok(tx)
     }
 
@@ -100,36 +100,35 @@ impl<'db> Transaction<'db> {
         // to true early here makes sure that if the future is dropped we don't queue a rollback
         // command.
         self.finalized = true;
-        match self.savepoint {
-            Some(_) => self
-                .db
-                .exec_operation(operation::Transaction::ReleaseSavepoint(self.savepoint()).into()),
-            None => self
-                .db
-                .exec_operation(operation::Transaction::Commit.into()),
-        }
-        .await?;
-        Ok(())
+        let op = match self.savepoint {
+            Some(_) => operation::Transaction::ReleaseSavepoint(self.savepoint()),
+            None => operation::Transaction::Commit,
+        };
+        self.execute(op).await
     }
 
     /// Roll back the transaction.
     pub async fn rollback(mut self) -> Result<()> {
         // See `commit` why we're setting the finalized flag to true early.
         self.finalized = true;
-        match self.savepoint {
-            Some(_) => self.db.exec_operation(
-                operation::Transaction::RollbackToSavepoint(self.savepoint()).into(),
-            ),
-            None => self
-                .db
-                .exec_operation(operation::Transaction::Rollback.into()),
-        }
-        .await?;
-        Ok(())
+        let op = match self.savepoint {
+            Some(_) => operation::Transaction::RollbackToSavepoint(self.savepoint()),
+            None => operation::Transaction::Rollback,
+        };
+        self.execute(op).await
     }
 
     fn savepoint(&self) -> String {
         format!("tx_{}", self.savepoint.unwrap())
+    }
+
+    async fn execute(&mut self, op: operation::Transaction) -> Result<()> {
+        self.conn
+            .lock()
+            .await
+            .exec(self.db.schema(), op.into())
+            .await?;
+        Ok(())
     }
 }
 
@@ -141,8 +140,9 @@ impl Drop for Transaction<'_> {
                 None => operation::Transaction::Rollback,
             };
             let db = self.db.clone();
+            let conn = self.conn.clone();
             tokio::spawn(async move {
-                let _ = db.exec_operation(op.into()).await;
+                let _ = conn.lock().await.exec(db.schema(), op.into()).await;
             });
         }
     }
@@ -151,7 +151,8 @@ impl Drop for Transaction<'_> {
 #[async_trait]
 impl<'a> Executor for Transaction<'a> {
     async fn transaction(&mut self) -> Result<Transaction<'_>> {
-        let transaction = Transaction {
+        let mut tx = Transaction {
+            conn: self.conn.clone(),
             db: self.db,
             finalized: false,
             savepoint: Some(match self.savepoint {
@@ -160,16 +161,14 @@ impl<'a> Executor for Transaction<'a> {
             }),
         };
 
-        transaction
-            .db
-            .exec_operation(operation::Transaction::Savepoint(transaction.savepoint()).into())
+        tx.execute(operation::Transaction::Savepoint(tx.savepoint()))
             .await?;
-
-        Ok(transaction)
+        Ok(tx)
     }
 
     async fn exec_untyped(&mut self, stmt: toasty_core::stmt::Statement) -> Result<Value> {
-        self.db.exec_stmt(stmt, true).await
+        let mut conn = self.conn.lock().await;
+        self.db.exec_stmt(&mut **conn, stmt, true).await
     }
 
     fn schema(&mut self) -> &Arc<Schema> {

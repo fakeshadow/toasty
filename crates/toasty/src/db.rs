@@ -54,6 +54,7 @@ impl Db {
 
     pub(crate) async fn exec_stmt(
         &self,
+        conn: &mut dyn Connection,
         stmt: stmt::Statement,
         in_transaction: bool,
     ) -> Result<Value> {
@@ -68,8 +69,7 @@ impl Db {
             stmt::Statement::Delete(d) => !d.selection().single,
         };
 
-        let mut conn = self.connection().await?;
-        let mut stream = self.engine.exec(&mut *conn, stmt, in_transaction).await?;
+        let mut stream = self.engine.exec(conn, stmt, in_transaction).await?;
 
         if returns_list {
             let values = stream.collect().await?;
@@ -80,13 +80,6 @@ impl Db {
                 None => Ok(Value::Null),
             }
         }
-    }
-
-    pub(crate) async fn exec_operation(&self, operation: Operation) -> Result<Response> {
-        self.connection()
-            .await?
-            .exec(self.schema(), operation)
-            .await
     }
 
     /// Create a [`TransactionBuilder`] for configuring transaction options
@@ -157,8 +150,9 @@ impl Executor for Db {
         Transaction::begin(self).await
     }
 
+    #[inline]
     async fn exec_untyped(&mut self, stmt: stmt::Statement) -> Result<Value> {
-        self.exec_stmt(stmt, false).await
+        (&*self).exec_untyped(stmt).await
     }
 
     fn schema(&mut self) -> &Arc<Schema> {
@@ -173,7 +167,8 @@ impl Executor for &Db {
     }
 
     async fn exec_untyped(&mut self, stmt: stmt::Statement) -> Result<Value> {
-        self.exec_stmt(stmt, false).await
+        let mut conn = self.connection().await?;
+        self.exec_stmt(&mut *conn, stmt, false).await
     }
 
     fn schema(&mut self) -> &Arc<Schema> {
