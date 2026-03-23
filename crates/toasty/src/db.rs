@@ -1,13 +1,10 @@
 mod builder;
 mod connect;
-mod pool;
 
 pub use builder::Builder;
 pub use connect::*;
-pub use pool::*;
 
 use crate::{engine::Engine, Executor, Result, Transaction, TransactionBuilder};
-pub(crate) use pool::{ConnectionHandle, ConnectionOperation};
 
 use toasty_core::{
     async_trait,
@@ -17,31 +14,12 @@ use toasty_core::{
 };
 
 use std::sync::Arc;
-use tokio::sync::oneshot;
-
-/// Shared state between all `Db` clones.
-pub(crate) struct Shared {
-    pub(crate) engine: Engine,
-    pub(crate) pool: Pool,
-}
 
 /// A database handle. Each instance owns (or will lazily acquire) a dedicated
-/// connection from the pool. Cloning produces a new handle that will acquire its
-/// own connection on first use. Dropping the [`Db`] instance will release the database connection
-/// back to the pool.
+/// connection from the pool.
+#[derive(Clone)]
 pub struct Db {
-    shared: Arc<Shared>,
-    pub(crate) connection: Option<PoolConnection>,
-}
-
-impl Clone for Db {
-    fn clone(&self) -> Self {
-        Db {
-            shared: self.shared.clone(),
-            // Cloned Db will acquire a new connection lazily.
-            connection: None,
-        }
-    }
+    pub(crate) engine: Engine,
 }
 
 impl Db {
@@ -70,17 +48,12 @@ impl Db {
     }
 
     /// Lazily acquire a connection from the pool.
-    pub(crate) async fn connection(&mut self) -> Result<&ConnectionHandle> {
-        let conn = match &mut self.connection {
-            Some(conn) => conn,
-            empty => empty.insert(self.shared.pool.get().await?),
-        };
-
-        Ok(conn.handle())
+    pub(crate) async fn connection(&self) -> Result<Box<dyn Connection>> {
+        self.engine.driver.connect().await
     }
 
     pub(crate) async fn exec_stmt(
-        &mut self,
+        &self,
         stmt: stmt::Statement,
         in_transaction: bool,
     ) -> Result<Value> {
@@ -95,18 +68,8 @@ impl Db {
             stmt::Statement::Delete(d) => !d.selection().single,
         };
 
-        let (tx, rx) = oneshot::channel();
-
-        let conn = self.connection().await?;
-        conn.in_tx
-            .send(ConnectionOperation::ExecStatement {
-                stmt: Box::new(stmt),
-                in_transaction,
-                tx,
-            })
-            .unwrap();
-
-        let mut stream = rx.await.unwrap()?;
+        let mut conn = self.connection().await?;
+        let mut stream = self.engine.exec(&mut *conn, stmt, in_transaction).await?;
 
         if returns_list {
             let values = stream.collect().await?;
@@ -119,18 +82,11 @@ impl Db {
         }
     }
 
-    pub(crate) async fn exec_operation(&mut self, operation: Operation) -> Result<Response> {
-        let (tx, rx) = oneshot::channel();
-
-        let conn = self.connection().await?;
-        conn.in_tx
-            .send(ConnectionOperation::ExecOperation {
-                operation: Box::new(operation),
-                tx,
-            })
-            .unwrap();
-
-        rx.await.unwrap()
+    pub(crate) async fn exec_operation(&self, operation: Operation) -> Result<Response> {
+        self.connection()
+            .await?
+            .exec(self.schema(), operation)
+            .await
     }
 
     /// Create a [`TransactionBuilder`] for configuring transaction options
@@ -162,27 +118,22 @@ impl Db {
 
     /// Creates tables and indices defined in the schema on the database.
     pub async fn push_schema(&mut self) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        let conn = self.connection().await?;
-        conn.in_tx
-            .send(ConnectionOperation::PushSchema { tx })
-            .unwrap();
-        rx.await.unwrap()
+        self.connection().await?.push_schema(self.schema()).await
     }
 
     /// Drops the entire database and recreates an empty one without applying migrations.
     pub async fn reset_db(&self) -> Result<()> {
-        self.shared.pool.driver().reset_db().await
+        self.driver().reset_db().await
     }
 
     /// Returns a reference to the underlying database driver.
     pub fn driver(&self) -> &dyn Driver {
-        self.shared.pool.driver()
+        &*self.engine.driver
     }
 
     /// Returns the compiled schema used by this database handle.
     pub fn schema(&self) -> &Arc<Schema> {
-        &self.shared.engine.schema
+        &self.engine.schema
     }
 
     /// Returns the capability flags reported by the driver.
@@ -190,29 +141,33 @@ impl Db {
     /// The query engine uses these to decide which operation types to generate
     /// (e.g., SQL vs. key-value).
     pub fn capability(&self) -> &Capability {
-        self.shared.engine.capability()
-    }
-
-    /// Returns a reference to the connection pool backing this handle.
-    #[doc(hidden)]
-    pub fn pool(&self) -> &Pool {
-        &self.shared.pool
+        self.engine.capability()
     }
 }
 
 impl std::fmt::Debug for Db {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Db")
-            .field("engine", &self.shared.engine)
-            .field("connected", &self.connection.is_some())
-            .finish()
+        f.debug_struct("Db").field("engine", &self.engine).finish()
     }
 }
 
-impl Db {}
-
 #[async_trait]
 impl Executor for Db {
+    async fn transaction(&mut self) -> Result<Transaction<'_>> {
+        Transaction::begin(self).await
+    }
+
+    async fn exec_untyped(&mut self, stmt: stmt::Statement) -> Result<Value> {
+        self.exec_stmt(stmt, false).await
+    }
+
+    fn schema(&mut self) -> &Arc<Schema> {
+        Db::schema(self)
+    }
+}
+
+#[async_trait]
+impl Executor for &Db {
     async fn transaction(&mut self) -> Result<Transaction<'_>> {
         Transaction::begin(self).await
     }

@@ -15,7 +15,7 @@ mod verify;
 use crate::Result;
 use std::sync::Arc;
 use toasty_core::{
-    driver::Capability,
+    driver::{Capability, Driver},
     stmt::{self, Statement, ValueStream},
     Connection, Schema,
 };
@@ -39,18 +39,18 @@ pub(crate) struct Engine {
     pub(crate) schema: Arc<Schema>,
 
     /// Driver capabilities, used during planning.
-    pub(crate) capability: &'static Capability,
+    pub(crate) driver: Arc<dyn Driver>,
 }
 
 impl Engine {
     /// Creates a new [`Engine`] with the given schema and capability.
-    pub(crate) fn new(schema: Arc<Schema>, capability: &'static Capability) -> Engine {
-        Engine { schema, capability }
+    pub(crate) fn new(schema: Arc<Schema>, driver: Arc<dyn Driver>) -> Engine {
+        Engine { schema, driver }
     }
 
     /// Returns the driver's capabilities.
     pub(crate) fn capability(&self) -> &Capability {
-        self.capability
+        self.driver.capability()
     }
 
     /// Executes a statement on the given connection and returns the result as a

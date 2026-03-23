@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{db::ConnectionOperation, Executor, Result};
+use crate::{Db, Executor, Result};
 
 use toasty_core::{
     async_trait,
@@ -8,17 +8,16 @@ use toasty_core::{
     stmt::Value,
     Schema,
 };
-use tokio::sync::oneshot;
 
 /// Builder for configuring a transaction before starting it.
 pub struct TransactionBuilder<'db> {
-    db: &'db mut crate::Db,
+    db: &'db Db,
     isolation: Option<IsolationLevel>,
     read_only: bool,
 }
 
 impl<'db> TransactionBuilder<'db> {
-    pub(crate) fn new(db: &'db mut crate::Db) -> Self {
+    pub(crate) fn new(db: &'db Db) -> Self {
         TransactionBuilder {
             db,
             isolation: None,
@@ -52,8 +51,7 @@ impl<'db> TransactionBuilder<'db> {
 /// If dropped without calling [`commit`](Self::commit) or
 /// [`rollback`](Self::rollback), the transaction is automatically rolled back.
 pub struct Transaction<'db> {
-    /// Holds the mutable borrow of Db to prevent concurrent use.
-    db: &'db mut crate::Db,
+    db: &'db Db,
 
     /// Cloned engine for schema access and query compilation.
     /// Whether commit or rollback has been called.
@@ -65,12 +63,12 @@ pub struct Transaction<'db> {
 }
 
 impl<'db> Transaction<'db> {
-    pub(crate) async fn begin(db: &'db mut crate::Db) -> Result<Transaction<'db>> {
+    pub(crate) async fn begin(db: &'db Db) -> Result<Transaction<'db>> {
         Self::begin_with(db, None, false).await
     }
 
     pub(crate) async fn begin_with(
-        db: &'db mut crate::Db,
+        db: &'db Db,
         isolation: Option<IsolationLevel>,
         read_only: bool,
     ) -> Result<Transaction<'db>> {
@@ -142,21 +140,10 @@ impl Drop for Transaction<'_> {
                 Some(_) => operation::Transaction::RollbackToSavepoint(self.savepoint()),
                 None => operation::Transaction::Rollback,
             };
-
-            // Fire-and-forget rollback: send the operation to the background
-            // connection task without awaiting the response. By the time a
-            // transaction exists, `begin` already acquired the connection, so
-            // it is always cached.
-            if let Some(conn) = self.db.connection.as_ref() {
-                let (tx, _rx) = oneshot::channel();
-                let _ = conn
-                    .handle()
-                    .in_tx
-                    .send(ConnectionOperation::ExecOperation {
-                        operation: Box::new(op.into()),
-                        tx,
-                    });
-            }
+            let db = self.db.clone();
+            tokio::spawn(async move {
+                let _ = db.exec_operation(op.into()).await;
+            });
         }
     }
 }

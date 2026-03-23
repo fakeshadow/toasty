@@ -1,9 +1,4 @@
-use crate::{
-    db::{Connect, Pool, Shared},
-    engine::Engine,
-    schema::Register,
-    Db, Result,
-};
+use crate::{db::Connect, engine::Engine, schema::Register, Db, Result};
 
 use toasty_core::{
     driver::Driver,
@@ -49,16 +44,8 @@ impl Builder {
         let capability = driver.capability();
         capability.validate()?;
         let schema = self.core.build(self.build_app_schema()?, capability)?;
-        let engine = Engine::new(Arc::new(schema), capability);
-        let pool = Pool::new(driver, engine.clone())?;
+        let engine = Engine::new(Arc::new(schema), Arc::new(driver));
 
-        // see if we're able to acquire a valid connection
-        let conn = pool.get().await?;
-        std::mem::drop(conn);
-
-        Ok(Db {
-            shared: Arc::new(Shared { engine, pool }),
-            connection: None,
-        })
+        Ok(Db { engine })
     }
 }
